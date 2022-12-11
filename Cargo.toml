@@ -1,6 +1,11 @@
 [package]
 name = "console_static_text"
 version = "0.1.0"
+authors = ["David Sherret <dsherret@gmail.com>"]
+license = "MIT"
+keywords = ["console"]
+repository = "https://github.com/dsherret/console_static_text"
+description = "Logging for text that should stay in the same place in a console."
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
