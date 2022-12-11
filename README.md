@@ -5,6 +5,7 @@ Zero dependency crate for logging text that should stay in the same place in a c
 Example use with the [console](https://crates.io/crates/console) crate:
 
 ```rs
+use console_static_text::ConsoleSize;
 use console_static_text::ConsoleStaticText;
 use console_static_text::ConsoleStaticTextOptions;
 
@@ -12,7 +13,13 @@ let mut static_text = ConsoleStaticText::new(
   ConsoleStaticTextOptions {
     // I honestly haven't tested this
     strip_ansi_codes: Box::new(console::strip_ansi_codes),
-    terminal_width: Box::new(|| console::Term::stderr().size().1),
+    console_size: Box::new(|| {
+      let size = console::Term::stderr().size();
+      ConsoleSize {
+         rows: size.0,
+         cols: size.1,
+      }
+    }),
   },
 );
 
@@ -27,4 +34,6 @@ if let Some(text) = static_text.get_update_text("new text") {
 
 // clear out the previous text
 static_text.eprint_clear();
+
+// todo: document hanging indent support
 ```

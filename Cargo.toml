@@ -1,6 +1,6 @@
 [package]
 name = "console_static_text"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["David Sherret <dsherret@gmail.com>"]
 license = "MIT"
 keywords = ["console"]

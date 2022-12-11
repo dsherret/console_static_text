@@ -13,6 +13,21 @@ fn vts_move_up(count: usize) -> String {
   }
 }
 
+pub enum TextItem<'a> {
+  Text(&'a str),
+  HangingText { text: &'a str, indent: u16 },
+}
+
+impl<'a> TextItem<'a> {
+  pub fn new(text: &'a str) -> Self {
+    Self::Text(text)
+  }
+
+  pub fn with_hanging_indent(text: &'a str, indent: u16) -> Self {
+    Self::HangingText { text, indent }
+  }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 struct Line {
   pub char_width: usize,
@@ -25,25 +40,31 @@ enum WordToken<'a> {
   NewLine,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConsoleSize {
+  pub cols: u16,
+  pub rows: u16,
+}
+
 pub struct ConsoleStaticTextOptions {
   /// Function to strip ANSI codes.
   pub strip_ansi_codes: Box<dyn (Fn(&str) -> Cow<str>) + Send>,
   /// Function to get the terminal width.
-  pub terminal_width: Box<dyn (Fn() -> u16) + Send>,
+  pub console_size: Box<dyn (Fn() -> ConsoleSize) + Send>,
 }
 
 pub struct ConsoleStaticText {
   strip_ansi_codes: Box<dyn (Fn(&str) -> Cow<str>) + Send>,
-  terminal_width: Box<dyn (Fn() -> u16) + Send>,
+  console_size: Box<dyn (Fn() -> ConsoleSize) + Send>,
   last_lines: Vec<Line>,
-  last_terminal_width: u16,
+  last_size: ConsoleSize,
 }
 
 impl std::fmt::Debug for ConsoleStaticText {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.debug_struct("StaticText")
       .field("last_lines", &self.last_lines)
-      .field("last_terminal_width", &self.last_terminal_width)
+      .field("last_size", &self.last_size)
       .finish()
   }
 }
@@ -52,9 +73,9 @@ impl ConsoleStaticText {
   pub fn new(options: ConsoleStaticTextOptions) -> Self {
     Self {
       strip_ansi_codes: options.strip_ansi_codes,
-      terminal_width: options.terminal_width,
+      console_size: options.console_size,
       last_lines: Vec::new(),
-      last_terminal_width: 0,
+      last_size: ConsoleSize { cols: 0, rows: 0 },
     }
   }
 
@@ -65,8 +86,8 @@ impl ConsoleStaticText {
   }
 
   pub fn get_clear_text(&mut self) -> Option<String> {
-    let terminal_width = (self.terminal_width)();
-    let last_lines = self.get_last_lines(terminal_width);
+    let size = (self.console_size)();
+    let last_lines = self.get_last_lines(size);
     if !last_lines.is_empty() {
       Some(format!(
         "{}{}{}",
@@ -86,36 +107,41 @@ impl ConsoleStaticText {
   }
 
   pub fn get_update_text(&mut self, new_text: &str) -> Option<String> {
-    self.get_update_text_with_width(new_text, (self.terminal_width)())
+    self.get_update_text_with_size(new_text, (self.console_size)())
   }
 
-  pub fn eprint_with_width(
-    &mut self,
-    new_text: &str,
-    terminal_width: u16,
-  ) {
-    if let Some(text) = self.get_update_text_with_width(new_text, terminal_width) {
+  pub fn eprint_with_size(&mut self, new_text: &str, size: ConsoleSize) {
+    if let Some(text) = self.get_update_text_with_size(new_text, size) {
       eprint!("{}", text);
     }
   }
 
-  pub fn get_update_text_with_width(
+  pub fn get_update_text_with_size(
     &mut self,
     new_text: &str,
-    terminal_width: u16,
+    size: ConsoleSize,
   ) -> Option<String> {
-    let is_terminal_width_different =
-      terminal_width != self.last_terminal_width;
-    let last_lines = self.get_last_lines(terminal_width);
-    let new_lines =
-      self.render_text_to_lines(new_text, terminal_width as usize);
+    self.get_update_text_with_size_from_items(
+      vec![TextItem::Text(new_text)].into_iter(),
+      size,
+    )
+  }
+
+  pub fn get_update_text_with_size_from_items<'a>(
+    &mut self,
+    text_items: impl Iterator<Item = TextItem<'a>>,
+    size: ConsoleSize,
+  ) -> Option<String> {
+    let is_terminal_different = size != self.last_size;
+    let last_lines = self.get_last_lines(size);
+    let new_lines = self.render_items(text_items, size);
     let result = if !are_collections_equal(&last_lines, &new_lines) {
       let mut text = String::new();
       text.push_str(VTS_MOVE_TO_ZERO_COL);
       if !last_lines.is_empty() {
         text.push_str(&vts_move_up(last_lines.len() - 1));
       }
-      if is_terminal_width_different {
+      if is_terminal_different {
         text.push_str(VTS_CLEAR_CURSOR_DOWN);
       }
       for i in 0..std::cmp::max(last_lines.len(), new_lines.len()) {
@@ -143,19 +169,18 @@ impl ConsoleStaticText {
       None
     };
     self.last_lines = new_lines;
-    self.last_terminal_width = terminal_width;
+    self.last_size = size;
     result
   }
 
-  fn get_last_lines(&mut self, terminal_width: u16) -> Vec<Line> {
+  fn get_last_lines(&mut self, size: ConsoleSize) -> Vec<Line> {
     // render based on how the text looks right now
-    let terminal_width = if self.last_terminal_width < terminal_width {
-      self.last_terminal_width
-    } else {
-      terminal_width
+    let size = ConsoleSize {
+      cols: std::cmp::min(size.cols, self.last_size.cols),
+      rows: std::cmp::min(size.rows, self.last_size.rows),
     };
 
-    if terminal_width == self.last_terminal_width {
+    if size == self.last_size {
       self.last_lines.drain(..).collect()
     } else {
       // render the last text with the current terminal width
@@ -164,13 +189,55 @@ impl ConsoleStaticText {
         .drain(..)
         .map(|l| l.text)
         .collect::<Vec<_>>();
-      self.render_text_to_lines(&line_texts.join("\n"), terminal_width as usize)
+      let text = line_texts.join("\n");
+      self.render_items(vec![TextItem::new(&text)].into_iter(), size)
+    }
+  }
+
+  fn render_items<'a>(
+    &self,
+    text_items: impl Iterator<Item = TextItem<'a>>,
+    size: ConsoleSize,
+  ) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let terminal_width = size.cols as usize;
+    for item in text_items {
+      match item {
+        TextItem::Text(text) => {
+          lines.extend(self.render_text_to_lines(text, 0, terminal_width))
+        }
+        TextItem::HangingText { text, indent } => {
+          lines.extend(self.render_text_to_lines(
+            text,
+            indent as usize,
+            terminal_width,
+          ));
+        }
+      }
+    }
+    let terminal_height = size.rows as usize;
+    if lines.len() > terminal_height {
+      let cutoff_index = lines.len() - terminal_height;
+      lines
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+          if index < cutoff_index {
+            None
+          } else {
+            Some(line)
+          }
+        })
+        .collect()
+    } else {
+      lines
     }
   }
 
   fn render_text_to_lines(
     &self,
     text: &str,
+    hanging_indent: usize,
     terminal_width: usize,
   ) -> Vec<Line> {
     let mut lines = Vec::new();
@@ -180,7 +247,8 @@ impl ConsoleStaticText {
     for token in self.tokenize_words(text) {
       match token {
         WordToken::Word(word, word_width) => {
-          let is_word_longer_than_line = word_width > terminal_width;
+          let is_word_longer_than_line =
+            hanging_indent + word_width > terminal_width;
           if is_word_longer_than_line {
             // break it up onto multiple lines with indentation
             if !current_whitespace.is_empty() {
@@ -196,7 +264,8 @@ impl ConsoleStaticText {
                   text: current_line,
                 });
                 current_line = String::new();
-                line_width = 0;
+                current_line.push_str(&" ".repeat(hanging_indent));
+                line_width = hanging_indent;
               }
               current_line.push(c);
               line_width += 1;
@@ -208,7 +277,8 @@ impl ConsoleStaticText {
                 text: current_line,
               });
               current_line = String::new();
-              line_width = 0;
+              current_line.push_str(&" ".repeat(hanging_indent));
+              line_width = hanging_indent;
               current_whitespace = String::new();
             }
             if !current_whitespace.is_empty() {
