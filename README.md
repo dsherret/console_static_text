@@ -1,5 +1,7 @@
 # console_static_text
 
+[![](https://img.shields.io/crates/v/console_static_text.svg)](https://crates.io/crates/console_static_text)
+
 Crate for logging text that should stay in the same place in a console. This measures words to handle wrapping and has some console resizing support. Example use might be for displaying progress bars or rendering selections.
 
 Example use with the [console](https://crates.io/crates/console) crate:
