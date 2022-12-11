@@ -1,6 +1,6 @@
 # console_static_text
 
-Zero dependency crate for logging text that should stay in the same place in a console. This measures words to handle wrapping and has some console resizing support. For an example, this could be used for displaying progress bars or inputs.
+Zero dependency crate for logging text that should stay in the same place in a console. This measures words to handle wrapping and has some console resizing support. Example use might be for displaying progress bars or rendering selections.
 
 Example use with the [console](https://crates.io/crates/console) crate:
 
