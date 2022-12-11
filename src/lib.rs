@@ -25,21 +25,21 @@ enum WordToken<'a> {
   NewLine,
 }
 
-pub struct StaticTextOptions {
+pub struct ConsoleStaticTextOptions {
   /// Function to strip ANSI codes.
-  pub strip_ansi_codes: Box<dyn Fn(&str) -> Cow<str>>,
+  pub strip_ansi_codes: Box<dyn (Fn(&str) -> Cow<str>) + Send>,
   /// Function to get the terminal width.
-  pub terminal_width: Box<dyn Fn() -> u16>,
+  pub terminal_width: Box<dyn (Fn() -> u16) + Send>,
 }
 
-pub struct StaticText {
-  strip_ansi_codes: Box<dyn Fn(&str) -> Cow<str>>,
-  terminal_width: Box<dyn Fn() -> u16>,
+pub struct ConsoleStaticText {
+  strip_ansi_codes: Box<dyn (Fn(&str) -> Cow<str>) + Send>,
+  terminal_width: Box<dyn (Fn() -> u16) + Send>,
   last_lines: Vec<Line>,
   last_terminal_width: u16,
 }
 
-impl std::fmt::Debug for StaticText {
+impl std::fmt::Debug for ConsoleStaticText {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     f.debug_struct("StaticText")
       .field("last_lines", &self.last_lines)
@@ -48,8 +48,8 @@ impl std::fmt::Debug for StaticText {
   }
 }
 
-impl StaticText {
-  pub fn new(options: StaticTextOptions) -> Self {
+impl ConsoleStaticText {
+  pub fn new(options: ConsoleStaticTextOptions) -> Self {
     Self {
       strip_ansi_codes: options.strip_ansi_codes,
       terminal_width: options.terminal_width,
@@ -58,7 +58,13 @@ impl StaticText {
     }
   }
 
-  pub fn clear(&mut self) -> Option<String> {
+  pub fn eprint_clear(&mut self) {
+    if let Some(text) = self.get_clear_text() {
+      eprint!("{}", text);
+    }
+  }
+
+  pub fn get_clear_text(&mut self) -> Option<String> {
     let terminal_width = (self.terminal_width)();
     let last_lines = self.get_last_lines(terminal_width);
     if !last_lines.is_empty() {
@@ -73,11 +79,27 @@ impl StaticText {
     }
   }
 
-  pub fn update(&mut self, new_text: &str) -> Option<String> {
-    self.update_with_width(new_text, (self.terminal_width)())
+  pub fn eprint(&mut self, new_text: &str) {
+    if let Some(text) = self.get_update_text(new_text) {
+      eprint!("{}", text);
+    }
   }
 
-  pub fn update_with_width(
+  pub fn get_update_text(&mut self, new_text: &str) -> Option<String> {
+    self.get_update_text_with_width(new_text, (self.terminal_width)())
+  }
+
+  pub fn eprint_with_width(
+    &mut self,
+    new_text: &str,
+    terminal_width: u16,
+  ) {
+    if let Some(text) = self.get_update_text_with_width(new_text, terminal_width) {
+      eprint!("{}", text);
+    }
+  }
+
+  pub fn get_update_text_with_width(
     &mut self,
     new_text: &str,
     terminal_width: u16,
