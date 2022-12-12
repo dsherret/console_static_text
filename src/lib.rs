@@ -177,6 +177,7 @@ impl ConsoleStaticText {
           text.push_str(VTS_CLEAR_CURSOR_DOWN);
           text.push_str(&vts_move_up(1));
         }
+        text.push_str(VTS_MOVE_TO_ZERO_COL);
         Some(text)
       } else {
         None
@@ -419,7 +420,7 @@ mod test {
     assert_eq!(
       result,
       format!(
-        "{}{}{}{}{}{}{}",
+        "{}{}{}{}{}{}{}{}",
         VTS_MOVE_TO_ZERO_COL,
         vts_move_up(1),
         "123",
@@ -427,6 +428,7 @@ mod test {
         vts_move_down(1),
         VTS_CLEAR_CURSOR_DOWN,
         vts_move_up(1),
+        VTS_MOVE_TO_ZERO_COL,
       )
     );
 
