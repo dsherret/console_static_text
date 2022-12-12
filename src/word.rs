@@ -4,7 +4,7 @@ pub enum WordToken<'a> {
   NewLine,
 }
 
-pub fn tokenize_words<'a>(text: &'a str) -> Vec<WordToken<'a>> {
+pub fn tokenize_words(text: &str) -> Vec<WordToken> {
   let mut start_index = 0;
   let mut tokens = Vec::new();
   for (index, c) in text.char_indices() {

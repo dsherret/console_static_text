@@ -6,8 +6,10 @@ mod ansi;
 mod word;
 
 const VTS_MOVE_TO_ZERO_COL: &str = "\x1B[0G";
-const VTS_CLEAR_CURRENT_LINE: &str = "\x1B[2K";
-const VTS_CLEAR_CURSOR_DOWN: &str = "\x1B[J";
+const VTS_CLEAR_CURSOR_DOWN: &str = concat!(
+  "\x1B[2K", // clear current line
+  "\x1B[J",  // clear cursor down
+);
 const VTS_CLEAR_UNTIL_NEWLINE: &str = "\x1B[K";
 
 fn vts_move_up(count: usize) -> String {
@@ -15,6 +17,14 @@ fn vts_move_up(count: usize) -> String {
     String::new()
   } else {
     format!("\x1B[{}A", count)
+  }
+}
+
+fn vts_move_down(count: usize) -> String {
+  if count == 0 {
+    String::new()
+  } else {
+    format!("\x1B[{}B", count)
   }
 }
 
@@ -149,25 +159,23 @@ impl ConsoleStaticText {
         if is_terminal_different_size {
           text.push_str(VTS_CLEAR_CURSOR_DOWN);
         }
-        for i in 0..std::cmp::max(last_lines.len(), new_lines.len()) {
-          let last_line = last_lines.get(i);
-          let new_line = new_lines.get(i);
+        for (i, new_line) in new_lines.iter().enumerate() {
           if i > 0 {
             text.push('\n');
           }
-          if let Some(new_line) = new_line {
-            text.push_str(&new_line.text);
-            if let Some(last_line) = last_line {
+          text.push_str(&new_line.text);
+          if !is_terminal_different_size {
+            if let Some(last_line) = last_lines.get(i) {
               if last_line.char_width > new_line.char_width {
                 text.push_str(VTS_CLEAR_UNTIL_NEWLINE);
               }
             }
-          } else {
-            text.push_str(VTS_CLEAR_CURRENT_LINE);
           }
         }
         if last_lines.len() > new_lines.len() {
-          text.push_str(&vts_move_up(last_lines.len() - new_lines.len()));
+          text.push_str(&vts_move_down(1));
+          text.push_str(VTS_CLEAR_CURSOR_DOWN);
+          text.push_str(&vts_move_up(1));
         }
         Some(text)
       } else {
@@ -213,8 +221,8 @@ impl ConsoleStaticText {
                 char_width: count,
                 text: current_line,
               });
-              current_line = String::new();
-              count = 0;
+              current_line = c.to_string();
+              count = width;
             } else {
               count += width;
               current_line.push(c);
@@ -298,10 +306,10 @@ fn render_text_to_lines(
       match token {
         WordToken::Word(word) => {
           let word_width = text_width(&strip_ansi_codes(word));
-          let is_word_longer_than_line =
-            hanging_indent + word_width > terminal_width;
-          if is_word_longer_than_line {
-            // break it up onto multiple lines with indentation
+          let is_word_longer_than_half_line =
+            hanging_indent + word_width > (terminal_width / 2);
+          if is_word_longer_than_half_line {
+            // break it up onto multiple lines with indentation if able
             if !current_whitespace.is_empty() {
               if line_width < terminal_width {
                 current_line.push_str(&current_whitespace);
@@ -312,7 +320,7 @@ fn render_text_to_lines(
               if ansi_token.is_escape {
                 current_line.push_str(&word[ansi_token.range]);
               } else {
-                for c in (&word[ansi_token.range]).chars() {
+                for c in word[ansi_token.range].chars() {
                   if let Some(char_width) =
                     unicode_width::UnicodeWidthChar::width(c)
                   {
@@ -389,4 +397,59 @@ fn text_width(text: &str) -> usize {
 
 fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
   a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| a == b)
+}
+
+#[cfg(test)]
+mod test {
+  use crate::ansi::strip_ansi_codes;
+  use crate::vts_move_down;
+  use crate::vts_move_up;
+  use crate::ConsoleSize;
+  use crate::ConsoleStaticText;
+  use crate::VTS_CLEAR_CURSOR_DOWN;
+  use crate::VTS_CLEAR_UNTIL_NEWLINE;
+  use crate::VTS_MOVE_TO_ZERO_COL;
+
+  #[test]
+  fn renders() {
+    let mut text = create();
+    let result = text.render("01234567890123456").unwrap();
+    assert_eq!(strip_ansi_codes(&result), "0123456789\n0123456");
+    let result = text.render("123").unwrap();
+    assert_eq!(
+      result,
+      format!(
+        "{}{}{}{}{}{}{}",
+        VTS_MOVE_TO_ZERO_COL,
+        vts_move_up(1),
+        "123",
+        VTS_CLEAR_UNTIL_NEWLINE,
+        vts_move_down(1),
+        VTS_CLEAR_CURSOR_DOWN,
+        vts_move_up(1),
+      )
+    );
+
+    let mut text = create();
+    let result = text.render("1").unwrap();
+    assert_eq!(strip_ansi_codes(&result), "1");
+    let result = text.render("").unwrap();
+    assert_eq!(strip_ansi_codes(&result), "");
+  }
+
+  #[test]
+  fn moves_long_text_multiple_lines() {
+    let mut text = create();
+    let result = text.render("012345 67890").unwrap();
+    assert_eq!(strip_ansi_codes(&result), "012345\n67890");
+    let result = text.render("01234567890 67890").unwrap();
+    assert_eq!(strip_ansi_codes(&result), "0123456789\n0 67890");
+  }
+
+  fn create() -> ConsoleStaticText {
+    ConsoleStaticText::new(|| ConsoleSize {
+      cols: Some(10),
+      rows: Some(10),
+    })
+  }
 }

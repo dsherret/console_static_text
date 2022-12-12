@@ -11,7 +11,7 @@ pub struct AnsiToken {
 
 pub fn strip_ansi_codes(text: &str) -> Cow<str> {
   let tokens = tokenize(text);
-  if tokens.len() == 0 && tokens[0].is_escape == false {
+  if tokens.is_empty() || tokens.len() == 1 && !tokens[0].is_escape {
     Cow::Borrowed(text)
   } else {
     let mut final_text = String::new();
@@ -144,13 +144,7 @@ mod test {
   #[test]
   fn should_tokenize() {
     let output = get_output("");
-    assert_eq!(
-      output,
-      vec![TestToken {
-        text: "".to_string(),
-        is_escape: false,
-      }]
-    );
+    assert_eq!(output, vec![]);
     let output = get_output("this is a test");
     assert_eq!(
       output,
