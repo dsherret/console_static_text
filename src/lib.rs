@@ -84,12 +84,13 @@ impl ConsoleStaticText {
     let size = (self.console_size)();
     let last_lines = self.get_last_lines(size);
     if !last_lines.is_empty() {
-      Some(format!(
-        "{}{}{}",
-        VTS_MOVE_TO_ZERO_COL,
-        vts_move_up(last_lines.len()),
-        VTS_CLEAR_CURSOR_DOWN
-      ))
+      let mut text = VTS_MOVE_TO_ZERO_COL.to_string();
+      let move_up_count = last_lines.len() - 1;
+      if move_up_count > 0 {
+        text.push_str(&vts_move_up(move_up_count));
+      }
+      text.push_str(VTS_CLEAR_CURSOR_DOWN);
+      Some(text)
     } else {
       None
     }
@@ -127,7 +128,7 @@ impl ConsoleStaticText {
     text_items: impl Iterator<Item = TextItem<'a>>,
     size: ConsoleSize,
   ) -> Option<String> {
-    let is_terminal_different = size != self.last_size;
+    let is_terminal_different_size = size != self.last_size;
     let last_lines = self.get_last_lines(size);
     let new_lines = render_items(text_items, size);
     let last_lines_for_new_lines = self.raw_render_last_items(
@@ -142,10 +143,10 @@ impl ConsoleStaticText {
       if !are_collections_equal(&last_lines, &last_lines_for_new_lines) {
         let mut text = String::new();
         text.push_str(VTS_MOVE_TO_ZERO_COL);
-        if !last_lines.is_empty() {
+        if last_lines.len() > 1 {
           text.push_str(&vts_move_up(last_lines.len() - 1));
         }
-        if is_terminal_different {
+        if is_terminal_different_size {
           text.push_str(VTS_CLEAR_CURSOR_DOWN);
         }
         for i in 0..std::cmp::max(last_lines.len(), new_lines.len()) {
