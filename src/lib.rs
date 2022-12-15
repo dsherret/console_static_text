@@ -1,4 +1,5 @@
 use ansi::strip_ansi_codes;
+use unicode_width::UnicodeWidthStr;
 use word::tokenize_words;
 use word::WordToken;
 
@@ -49,6 +50,16 @@ struct Line {
   pub text: String,
 }
 
+impl Line {
+  pub fn new(text: String) -> Self {
+    Self {
+      // measure the line width each time in order to not include trailing whitespace
+      char_width: UnicodeWidthStr::width(strip_ansi_codes(&text).as_ref()),
+      text,
+    }
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConsoleSize {
   pub cols: Option<u16>,
@@ -84,6 +95,10 @@ impl ConsoleStaticText {
     }
   }
 
+  pub fn console_size(&self) -> ConsoleSize {
+    (self.console_size)()
+  }
+
   pub fn eprint_clear(&mut self) {
     if let Some(text) = self.render_clear() {
       eprint!("{}", text);
@@ -91,7 +106,7 @@ impl ConsoleStaticText {
   }
 
   pub fn render_clear(&mut self) -> Option<String> {
-    let size = (self.console_size)();
+    let size = self.console_size();
     let last_lines = self.get_last_lines(size);
     if !last_lines.is_empty() {
       let mut text = VTS_MOVE_TO_ZERO_COL.to_string();
@@ -119,7 +134,7 @@ impl ConsoleStaticText {
   }
 
   pub fn render(&mut self, new_text: &str) -> Option<String> {
-    self.render_with_size(new_text, (self.console_size)())
+    self.render_with_size(new_text, self.console_size())
   }
 
   pub fn render_with_size(
@@ -141,7 +156,7 @@ impl ConsoleStaticText {
     let is_terminal_different_size = size != self.last_size;
     let last_lines = self.get_last_lines(size);
     let new_lines = render_items(text_items, size);
-    let last_lines_for_new_lines = self.raw_render_last_items(
+    let last_lines_for_new_lines = raw_render_last_items(
       &new_lines
         .iter()
         .map(|l| l.text.as_str())
@@ -188,12 +203,6 @@ impl ConsoleStaticText {
   }
 
   fn get_last_lines(&mut self, size: ConsoleSize) -> Vec<Line> {
-    // render based on how the text looks right now
-    let size = ConsoleSize {
-      cols: std::cmp::min(size.cols, self.last_size.cols),
-      rows: std::cmp::min(size.rows, self.last_size.rows),
-    };
-
     if size == self.last_size {
       self.last_lines.drain(..).collect()
     } else {
@@ -204,49 +213,44 @@ impl ConsoleStaticText {
         .map(|l| l.text)
         .collect::<Vec<_>>();
       let text = line_texts.join("\n");
-      self.raw_render_last_items(&text, size)
+      raw_render_last_items(&text, size)
     }
   }
+}
 
-  fn raw_render_last_items(&self, text: &str, size: ConsoleSize) -> Vec<Line> {
-    let mut lines = Vec::new();
-    let text = strip_ansi_codes(text);
-    if let Some(terminal_width) = size.cols.map(|c| c as usize) {
-      for line in text.split('\n') {
-        let mut count = 0;
-        let mut current_line = String::new();
-        for c in line.chars() {
-          if let Some(width) = unicode_width::UnicodeWidthChar::width(c) {
-            if count + width > terminal_width {
-              lines.push(Line {
-                char_width: count,
-                text: current_line,
-              });
-              current_line = c.to_string();
-              count = width;
-            } else {
-              count += width;
-              current_line.push(c);
-            }
+fn raw_render_last_items(text: &str, size: ConsoleSize) -> Vec<Line> {
+  let mut lines = Vec::new();
+  let text = strip_ansi_codes(text);
+  if let Some(terminal_width) = size.cols.map(|c| c as usize) {
+    for line in text.split('\n') {
+      if line.is_empty() {
+        lines.push(Line::new(String::new()));
+        continue;
+      }
+      let mut count = 0;
+      let mut current_line = String::new();
+      for c in line.chars() {
+        if let Some(width) = unicode_width::UnicodeWidthChar::width(c) {
+          if count + width > terminal_width {
+            lines.push(Line::new(current_line));
+            current_line = c.to_string();
+            count = width;
+          } else {
+            count += width;
+            current_line.push(c);
           }
         }
-        if !current_line.is_empty() {
-          lines.push(Line {
-            char_width: count,
-            text: current_line,
-          });
-        }
       }
-    } else {
-      for line in text.split('\n') {
-        lines.push(Line {
-          char_width: text_width(line),
-          text: line.to_string(),
-        });
+      if !current_line.is_empty() {
+        lines.push(Line::new(current_line));
       }
     }
-    truncate_lines_height(lines, size)
+  } else {
+    for line in text.split('\n') {
+      lines.push(Line::new(line.to_string()));
+    }
   }
+  truncate_lines_height(lines, size)
 }
 
 fn render_items<'a>(
@@ -270,7 +274,13 @@ fn render_items<'a>(
     }
   }
 
-  truncate_lines_height(lines, size)
+  let lines = truncate_lines_height(lines, size);
+  // ensure there's always 1 line
+  if lines.is_empty() {
+    vec![Line::new(String::new())]
+  } else {
+    lines
+  }
 }
 
 fn truncate_lines_height(lines: Vec<Line>, size: ConsoleSize) -> Vec<Line> {
@@ -306,7 +316,8 @@ fn render_text_to_lines(
     for token in tokenize_words(text) {
       match token {
         WordToken::Word(word) => {
-          let word_width = text_width(&strip_ansi_codes(word));
+          let word_width =
+            UnicodeWidthStr::width(strip_ansi_codes(word).as_ref());
           let is_word_longer_than_half_line =
             hanging_indent + word_width > (terminal_width / 2);
           if is_word_longer_than_half_line {
@@ -326,10 +337,7 @@ fn render_text_to_lines(
                     unicode_width::UnicodeWidthChar::width(c)
                   {
                     if line_width + char_width > terminal_width {
-                      lines.push(Line {
-                        char_width: line_width,
-                        text: current_line,
-                      });
+                      lines.push(Line::new(current_line));
                       current_line = String::new();
                       current_line.push_str(&" ".repeat(hanging_indent));
                       line_width = hanging_indent;
@@ -344,10 +352,7 @@ fn render_text_to_lines(
             }
           } else {
             if line_width + word_width > terminal_width {
-              lines.push(Line {
-                char_width: line_width,
-                text: current_line,
-              });
+              lines.push(Line::new(current_line));
               current_line = String::new();
               current_line.push_str(&" ".repeat(hanging_indent));
               line_width = hanging_indent;
@@ -363,37 +368,25 @@ fn render_text_to_lines(
         }
         WordToken::WhiteSpace(space_char) => {
           current_whitespace.push(space_char);
-          line_width += 1;
+          line_width +=
+            unicode_width::UnicodeWidthChar::width(space_char).unwrap_or(1);
         }
         WordToken::NewLine => {
-          lines.push(Line {
-            char_width: line_width,
-            text: current_line,
-          });
+          lines.push(Line::new(current_line));
           current_line = String::new();
           line_width = 0;
         }
       }
     }
     if !current_line.is_empty() {
-      lines.push(Line {
-        char_width: line_width,
-        text: current_line,
-      });
+      lines.push(Line::new(current_line));
     }
   } else {
     for line in text.split('\n') {
-      lines.push(Line {
-        char_width: text_width(&strip_ansi_codes(line)),
-        text: line.to_string(),
-      });
+      lines.push(Line::new(line.to_string()));
     }
   }
   lines
-}
-
-fn text_width(text: &str) -> usize {
-  unicode_width::UnicodeWidthStr::width(text)
 }
 
 fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
@@ -402,7 +395,9 @@ fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
 
 #[cfg(test)]
 mod test {
-  use crate::ansi::strip_ansi_codes;
+  use std::sync::Arc;
+  use std::sync::Mutex;
+
   use crate::vts_move_down;
   use crate::vts_move_up;
   use crate::ConsoleSize;
@@ -411,47 +406,123 @@ mod test {
   use crate::VTS_CLEAR_UNTIL_NEWLINE;
   use crate::VTS_MOVE_TO_ZERO_COL;
 
+  fn test_mappings() -> Vec<(String, String)> {
+    let mut mappings = Vec::new();
+    for i in 1..10 {
+      mappings.push((format!("~CUP{}~", i), vts_move_up(i)));
+      mappings.push((format!("~CDOWN{}~", i), vts_move_down(i)));
+    }
+    mappings.push((
+      "~CLEAR_CDOWN~".to_string(),
+      VTS_CLEAR_CURSOR_DOWN.to_string(),
+    ));
+    mappings.push((
+      "~CLEAR_UNTIL_NEWLINE~".to_string(),
+      VTS_CLEAR_UNTIL_NEWLINE.to_string(),
+    ));
+    mappings.push(("~MOVE0~".to_string(), VTS_MOVE_TO_ZERO_COL.to_string()));
+    mappings
+  }
+
+  struct Tester {
+    inner: ConsoleStaticText,
+    size: Arc<Mutex<ConsoleSize>>,
+    mappings: Vec<(String, String)>,
+  }
+
+  impl Tester {
+    pub fn new() -> Self {
+      let size = Arc::new(Mutex::new(ConsoleSize {
+        cols: Some(10),
+        rows: Some(10),
+      }));
+      Self {
+        inner: {
+          let size = size.clone();
+          ConsoleStaticText::new(move || size.lock().unwrap().clone())
+        },
+        size,
+        mappings: test_mappings(),
+      }
+    }
+
+    pub fn set_cols(&self, cols: Option<u16>) {
+      self.size.lock().unwrap().cols = cols;
+    }
+
+    pub fn set_rows(&self, rows: Option<u16>) {
+      self.size.lock().unwrap().rows = rows;
+    }
+
+    pub fn render(&mut self, text: &str) -> Option<String> {
+      self
+        .inner
+        .render(&self.map_text_to(text))
+        .map(|text| self.map_text_from(&text))
+    }
+
+    pub fn render_clear(&mut self) -> Option<String> {
+      self
+        .inner
+        .render_clear()
+        .map(|text| self.map_text_from(&text))
+    }
+
+    fn map_text_to(&self, text: &str) -> String {
+      let mut text = text.to_string();
+      for (from, to) in &self.mappings {
+        text = text.replace(from, to);
+      }
+      text
+    }
+
+    fn map_text_from(&self, text: &str) -> String {
+      let mut text = text.to_string();
+      for (to, from) in &self.mappings {
+        text = text.replace(from, to);
+      }
+      text
+    }
+  }
+
   #[test]
   fn renders() {
-    let mut text = create();
-    let result = text.render("01234567890123456").unwrap();
-    assert_eq!(strip_ansi_codes(&result), "0123456789\n0123456");
-    let result = text.render("123").unwrap();
+    let mut tester = Tester::new();
+    let result = tester.render("01234567890123456").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~0123456789\n0123456~MOVE0~");
+    let result = tester.render("123").unwrap();
     assert_eq!(
       result,
-      format!(
-        "{}{}{}{}{}{}{}{}",
-        VTS_MOVE_TO_ZERO_COL,
-        vts_move_up(1),
-        "123",
-        VTS_CLEAR_UNTIL_NEWLINE,
-        vts_move_down(1),
-        VTS_CLEAR_CURSOR_DOWN,
-        vts_move_up(1),
-        VTS_MOVE_TO_ZERO_COL,
-      )
+      "~MOVE0~~CUP1~123~CLEAR_UNTIL_NEWLINE~~CDOWN1~~CLEAR_CDOWN~~CUP1~~MOVE0~",
     );
+    let result = tester.render_clear().unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~");
 
-    let mut text = create();
-    let result = text.render("1").unwrap();
-    assert_eq!(strip_ansi_codes(&result), "1");
-    let result = text.render("").unwrap();
-    assert_eq!(strip_ansi_codes(&result), "");
+    let mut tester = Tester::new();
+    let result = tester.render("1").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~1~MOVE0~");
+    let result = tester.render("").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_UNTIL_NEWLINE~~MOVE0~");
   }
 
   #[test]
   fn moves_long_text_multiple_lines() {
-    let mut text = create();
-    let result = text.render("012345 67890").unwrap();
-    assert_eq!(strip_ansi_codes(&result), "012345\n67890");
-    let result = text.render("01234567890 67890").unwrap();
-    assert_eq!(strip_ansi_codes(&result), "0123456789\n0 67890");
+    let mut tester = Tester::new();
+    let result = tester.render("012345 67890").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\n67890~MOVE0~");
+    let result = tester.render("01234567890 67890").unwrap();
+    assert_eq!(result, "~MOVE0~~CUP1~0123456789\n0 67890~MOVE0~");
   }
 
-  fn create() -> ConsoleStaticText {
-    ConsoleStaticText::new(|| ConsoleSize {
-      cols: Some(10),
-      rows: Some(10),
-    })
+  #[test]
+  fn text_with_blank_line() {
+    let mut tester = Tester::new();
+    let result = tester.render("012345\n\n67890").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\n\n67890~MOVE0~");
+    let result = tester.render("123").unwrap();
+    assert_eq!(
+      result,
+      "~MOVE0~~CUP2~123~CLEAR_UNTIL_NEWLINE~~CDOWN1~~CLEAR_CDOWN~~CUP1~~MOVE0~"
+    );
   }
 }
