@@ -107,6 +107,10 @@ impl ConsoleStaticText {
 
   pub fn render_clear(&mut self) -> Option<String> {
     let size = self.console_size();
+    self.render_clear_with_size(size)
+  }
+
+  pub fn render_clear_with_size(&mut self, size: ConsoleSize) -> Option<String> {
     let last_lines = self.get_last_lines(size);
     if !last_lines.is_empty() {
       let mut text = VTS_MOVE_TO_ZERO_COL.to_string();
@@ -142,13 +146,20 @@ impl ConsoleStaticText {
     new_text: &str,
     size: ConsoleSize,
   ) -> Option<String> {
-    self.render_with_size_from_items(
+    self.render_items_with_size(
       vec![TextItem::Text(new_text)].into_iter(),
       size,
     )
   }
 
-  pub fn render_with_size_from_items<'a>(
+  pub fn render_items<'a>(
+    &mut self,
+    text_items: impl Iterator<Item = TextItem<'a>>,
+  ) -> Option<String> {
+    self.render_items_with_size(text_items, self.console_size())
+  }
+
+  pub fn render_items_with_size<'a>(
     &mut self,
     text_items: impl Iterator<Item = TextItem<'a>>,
     size: ConsoleSize,
