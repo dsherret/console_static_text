@@ -1,10 +1,11 @@
-use ansi::strip_ansi_codes;
 use unicode_width::UnicodeWidthStr;
 use word::tokenize_words;
 use word::WordToken;
 
 mod ansi;
 mod word;
+
+pub use ansi::strip_ansi_codes;
 
 const VTS_MOVE_TO_ZERO_COL: &str = "\x1B[0G";
 const VTS_CLEAR_CURSOR_DOWN: &str = concat!(
@@ -70,6 +71,7 @@ pub struct ConsoleStaticText {
   console_size: Box<dyn (Fn() -> ConsoleSize) + Send + 'static>,
   last_lines: Vec<Line>,
   last_size: ConsoleSize,
+  keep_cursor_zero_column: bool,
 }
 
 impl std::fmt::Debug for ConsoleStaticText {
@@ -92,7 +94,13 @@ impl ConsoleStaticText {
         cols: None,
         rows: None,
       },
+      keep_cursor_zero_column: true,
     }
+  }
+
+  /// Keeps the cursor at the zero column.
+  pub fn keep_cursor_zero_column(&mut self, value: bool) {
+    self.keep_cursor_zero_column = value;
   }
 
   pub fn console_size(&self) -> ConsoleSize {
@@ -110,7 +118,10 @@ impl ConsoleStaticText {
     self.render_clear_with_size(size)
   }
 
-  pub fn render_clear_with_size(&mut self, size: ConsoleSize) -> Option<String> {
+  pub fn render_clear_with_size(
+    &mut self,
+    size: ConsoleSize,
+  ) -> Option<String> {
     let last_lines = self.get_last_lines(size);
     if !last_lines.is_empty() {
       let mut text = VTS_MOVE_TO_ZERO_COL.to_string();
@@ -146,10 +157,8 @@ impl ConsoleStaticText {
     new_text: &str,
     size: ConsoleSize,
   ) -> Option<String> {
-    self.render_items_with_size(
-      vec![TextItem::Text(new_text)].into_iter(),
-      size,
-    )
+    self
+      .render_items_with_size(vec![TextItem::Text(new_text)].into_iter(), size)
   }
 
   pub fn render_items<'a>(
@@ -203,7 +212,9 @@ impl ConsoleStaticText {
           text.push_str(VTS_CLEAR_CURSOR_DOWN);
           text.push_str(&vts_move_up(1));
         }
-        text.push_str(VTS_MOVE_TO_ZERO_COL);
+        if self.keep_cursor_zero_column {
+          text.push_str(VTS_MOVE_TO_ZERO_COL);
+        }
         Some(text)
       } else {
         None
@@ -465,6 +476,14 @@ mod test {
       self.size.lock().unwrap().rows = rows;
     }
 
+    /// Keeps the cursor displaying at the zero column (default).
+    ///
+    /// When set to `false`, this will keep the cursor at the end
+    /// of the line.
+    pub fn keep_cursor_zero_column(&mut self, value: bool) {
+      self.inner.keep_cursor_zero_column(value);
+    }
+
     pub fn render(&mut self, text: &str) -> Option<String> {
       self
         .inner
@@ -514,6 +533,11 @@ mod test {
     assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~1~MOVE0~");
     let result = tester.render("").unwrap();
     assert_eq!(result, "~MOVE0~~CLEAR_UNTIL_NEWLINE~~MOVE0~");
+
+    // should not add a move0 here
+    tester.keep_cursor_zero_column(false);
+    let result = tester.render("1").unwrap();
+    assert_eq!(result, "~MOVE0~1");
   }
 
   #[test]
