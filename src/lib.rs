@@ -3,6 +3,8 @@ use word::tokenize_words;
 use word::WordToken;
 
 mod ansi;
+#[cfg(feature = "sized")]
+mod console;
 mod word;
 
 pub use ansi::strip_ansi_codes;
@@ -98,6 +100,17 @@ impl ConsoleStaticText {
     }
   }
 
+  #[cfg(feature = "sized")]
+  pub fn new_sized() -> Self {
+    Self::new(|| {
+      let size = console::size();
+      ConsoleSize {
+        cols: size.map(|s| s.0 .0),
+        rows: size.map(|s| s.1 .0),
+      }
+    })
+  }
+
   /// Keeps the cursor at the zero column.
   pub fn keep_cursor_zero_column(&mut self, value: bool) {
     self.keep_cursor_zero_column = value;
@@ -157,8 +170,31 @@ impl ConsoleStaticText {
     new_text: &str,
     size: ConsoleSize,
   ) -> Option<String> {
-    self
-      .render_items_with_size(vec![TextItem::Text(new_text)].into_iter(), size)
+    if new_text.is_empty() {
+      self.render_clear_with_size(size)
+    } else {
+      self.render_items_with_size(
+        vec![TextItem::Text(new_text)].into_iter(),
+        size,
+      )
+    }
+  }
+
+  pub fn eprint_items<'a>(
+    &mut self,
+    text_items: impl Iterator<Item = TextItem<'a>>,
+  ) {
+    self.eprint_items_with_size(text_items, self.console_size())
+  }
+
+  pub fn eprint_items_with_size<'a>(
+    &mut self,
+    text_items: impl Iterator<Item = TextItem<'a>>,
+    size: ConsoleSize,
+  ) {
+    if let Some(text) = self.render_items_with_size(text_items, size) {
+      eprint!("{}", text);
+    }
   }
 
   pub fn render_items<'a>(
@@ -424,6 +460,7 @@ mod test {
   use crate::vts_move_up;
   use crate::ConsoleSize;
   use crate::ConsoleStaticText;
+  use crate::TextItem;
   use crate::VTS_CLEAR_CURSOR_DOWN;
   use crate::VTS_CLEAR_UNTIL_NEWLINE;
   use crate::VTS_MOVE_TO_ZERO_COL;
@@ -492,6 +529,16 @@ mod test {
     }
 
     pub fn render_clear(&mut self) -> Option<String> {
+      self.inner.render_items(
+        vec![
+          TextItem::Text("Some regulard text."),
+          TextItem::HangingText {
+            text: "some long text that will wrap at a certain width",
+            indent: 4,
+          },
+        ]
+        .into_iter(),
+      );
       self
         .inner
         .render_clear()
