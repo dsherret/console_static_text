@@ -1,3 +1,6 @@
+use std::borrow::Cow;
+use std::io::Write;
+
 use unicode_width::UnicodeWidthStr;
 use word::tokenize_words;
 use word::WordToken;
@@ -33,17 +36,31 @@ fn vts_move_down(count: usize) -> String {
 }
 
 pub enum TextItem<'a> {
-  Text(&'a str),
-  HangingText { text: &'a str, indent: u16 },
+  Text(Cow<'a, str>),
+  HangingText { text: Cow<'a, str>, indent: u16 },
 }
 
 impl<'a> TextItem<'a> {
   pub fn new(text: &'a str) -> Self {
-    Self::Text(text)
+    Self::Text(Cow::Borrowed(text))
+  }
+
+  pub fn new_owned(text: String) -> Self {
+    Self::Text(Cow::Owned(text))
   }
 
   pub fn with_hanging_indent(text: &'a str, indent: u16) -> Self {
-    Self::HangingText { text, indent }
+    Self::HangingText {
+      text: Cow::Borrowed(text),
+      indent,
+    }
+  }
+
+  pub fn with_hanging_indent_owned(text: String, indent: u16) -> Self {
+    Self::HangingText {
+      text: Cow::Owned(text),
+      indent,
+    }
   }
 }
 
@@ -100,15 +117,23 @@ impl ConsoleStaticText {
     }
   }
 
+  /// Gets a `ConsoleStaticText` that knows how to get the console size.
+  ///
+  /// Returns `None` when stderr is not a tty or the console size can't be
+  /// retrieved from stderr.
   #[cfg(feature = "sized")]
-  pub fn new_sized() -> Self {
-    Self::new(|| {
-      let size = console::size();
-      ConsoleSize {
-        cols: size.map(|s| s.0 .0),
-        rows: size.map(|s| s.1 .0),
-      }
-    })
+  pub fn new_sized() -> Option<Self> {
+    if !atty::is(atty::Stream::Stderr) || console::size().is_none() {
+      None
+    } else {
+      Self::new(|| {
+        let size = console::size();
+        ConsoleSize {
+          cols: size.map(|s| s.0 .0),
+          rows: size.map(|s| s.1 .0),
+        }
+      })
+    }
   }
 
   /// Keeps the cursor at the zero column.
@@ -122,7 +147,7 @@ impl ConsoleStaticText {
 
   pub fn eprint_clear(&mut self) {
     if let Some(text) = self.render_clear() {
-      eprint!("{}", text);
+      std::io::stderr().write_all(text.as_bytes()).unwrap();
     }
   }
 
@@ -151,13 +176,13 @@ impl ConsoleStaticText {
 
   pub fn eprint(&mut self, new_text: &str) {
     if let Some(text) = self.render(new_text) {
-      eprint!("{}", text);
+      std::io::stderr().write_all(text.as_bytes()).unwrap();
     }
   }
 
   pub fn eprint_with_size(&mut self, new_text: &str, size: ConsoleSize) {
     if let Some(text) = self.render_with_size(new_text, size) {
-      eprint!("{}", text);
+      std::io::stderr().write_all(text.as_bytes()).unwrap();
     }
   }
 
@@ -173,40 +198,37 @@ impl ConsoleStaticText {
     if new_text.is_empty() {
       self.render_clear_with_size(size)
     } else {
-      self.render_items_with_size(
-        vec![TextItem::Text(new_text)].into_iter(),
-        size,
-      )
+      self.render_items_with_size(vec![TextItem::new(new_text)].iter(), size)
     }
   }
 
   pub fn eprint_items<'a>(
     &mut self,
-    text_items: impl Iterator<Item = TextItem<'a>>,
+    text_items: impl Iterator<Item = &'a TextItem<'a>>,
   ) {
     self.eprint_items_with_size(text_items, self.console_size())
   }
 
   pub fn eprint_items_with_size<'a>(
     &mut self,
-    text_items: impl Iterator<Item = TextItem<'a>>,
+    text_items: impl Iterator<Item = &'a TextItem<'a>>,
     size: ConsoleSize,
   ) {
     if let Some(text) = self.render_items_with_size(text_items, size) {
-      eprint!("{}", text);
+      std::io::stderr().write_all(text.as_bytes()).unwrap();
     }
   }
 
   pub fn render_items<'a>(
     &mut self,
-    text_items: impl Iterator<Item = TextItem<'a>>,
+    text_items: impl Iterator<Item = &'a TextItem<'a>>,
   ) -> Option<String> {
     self.render_items_with_size(text_items, self.console_size())
   }
 
   pub fn render_items_with_size<'a>(
     &mut self,
-    text_items: impl Iterator<Item = TextItem<'a>>,
+    text_items: impl Iterator<Item = &'a TextItem<'a>>,
     size: ConsoleSize,
   ) -> Option<String> {
     let is_terminal_different_size = size != self.last_size;
@@ -312,7 +334,7 @@ fn raw_render_last_items(text: &str, size: ConsoleSize) -> Vec<Line> {
 }
 
 fn render_items<'a>(
-  text_items: impl Iterator<Item = TextItem<'a>>,
+  text_items: impl Iterator<Item = &'a TextItem<'a>>,
   size: ConsoleSize,
 ) -> Vec<Line> {
   let mut lines = Vec::new();
@@ -320,12 +342,12 @@ fn render_items<'a>(
   for item in text_items {
     match item {
       TextItem::Text(text) => {
-        lines.extend(render_text_to_lines(text, 0, terminal_width))
+        lines.extend(render_text_to_lines(&text, 0, terminal_width))
       }
       TextItem::HangingText { text, indent } => {
         lines.extend(render_text_to_lines(
-          text,
-          indent as usize,
+          &text,
+          *indent as usize,
           terminal_width,
         ));
       }
@@ -453,6 +475,7 @@ fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
 
 #[cfg(test)]
 mod test {
+  use std::borrow::Cow;
   use std::sync::Arc;
   use std::sync::Mutex;
 
@@ -531,13 +554,15 @@ mod test {
     pub fn render_clear(&mut self) -> Option<String> {
       self.inner.render_items(
         vec![
-          TextItem::Text("Some regulard text."),
+          TextItem::new("Some regulard text."),
           TextItem::HangingText {
-            text: "some long text that will wrap at a certain width",
+            text: Cow::Borrowed(
+              "some long text that will wrap at a certain width",
+            ),
             indent: 4,
           },
         ]
-        .into_iter(),
+        .iter(),
       );
       self
         .inner

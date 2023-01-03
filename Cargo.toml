@@ -8,10 +8,27 @@ license = "MIT"
 repository = "https://github.com/dsherret/console_static_text"
 description = "Logging for text that should stay in the same place in a console."
 
+[package.metadata.docs.rs]
+all-features = true
+
+[[example]]
+name = "count"
+required-features = ["sized"]
+
+[[example]]
+name = "logging_text_above"
+required-features = ["sized"]
+
+[[example]]
+name = "word_wrapping"
+required-features = ["sized"]
+
 [features]
-sized = ["terminal_size", "rustix", "windows-sys"]
+sized = ["atty", "rustix", "terminal_size", "windows-sys"]
 
 [dependencies]
+atty = { version = "0.2", optional = true }
+crossterm = "0.25.0"
 terminal_size = { version = "0.2.3", optional = true }
 unicode-width = "0.1.10"
 vte = "0.11.0"

@@ -41,12 +41,12 @@ To get hanging indentation, you can use the lower level "items" api.
 
 ```rs
 static_text.eprint_items(vec![
-  TextItem::Text("Some non-hanging text."),
+  TextItem::Text(Cow::Borrowed("Some non-hanging text.")),
   TextItem::HangingText {
-    text: "some long text that will wrap at a certain width",
+    text: Cow::Borrowed("some long text that will wrap at a certain width"),
     indent: 4,
   },
-].into_iter());
+].iter());
 ```
 
 This is useful when implementing something like a selection UI where you want text to wrap with hanging indentation.
