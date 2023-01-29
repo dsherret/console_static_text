@@ -17,7 +17,16 @@ struct DrawState {
 
 pub fn main() {
   assert!(crossterm::tty::IsTty::is_tty(&std::io::stderr()));
-  let mut static_text = ConsoleStaticText::new(|| console_size());
+  let mut static_text = ConsoleStaticText::new(|| {
+    // since we're already using crossterm, get the size from
+    // it and don't bother with console_static_text's "sized"
+    // feature in order to reduce our dependencies
+    let (cols, rows) = crossterm::terminal::size().unwrap();
+    ConsoleSize {
+      rows: Some(rows),
+      cols: Some(cols),
+    }
+  });
   let mut state = DrawState {
     active_index: 0,
     message: "Which option would you like to select?".to_string(),
@@ -77,16 +86,6 @@ pub fn main() {
   execute!(stderr(), crossterm::cursor::Show).unwrap();
   static_text.eprint_clear();
   eprintln!("Selected: {}", state.items[state.active_index]);
-}
-
-fn console_size() -> ConsoleSize {
-  // get the size from crossterm and don't bother with the
-  // "sized" feature in order to reduce our dependencies
-  let (cols, rows) = crossterm::terminal::size().unwrap();
-  ConsoleSize {
-    rows: Some(rows),
-    cols: Some(cols),
-  }
 }
 
 /// Renders the draw state
