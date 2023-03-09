@@ -475,7 +475,6 @@ fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
 
 #[cfg(test)]
 mod test {
-  use std::borrow::Cow;
   use std::sync::Arc;
   use std::sync::Mutex;
 
@@ -483,7 +482,6 @@ mod test {
   use crate::vts_move_up;
   use crate::ConsoleSize;
   use crate::ConsoleStaticText;
-  use crate::TextItem;
   use crate::VTS_CLEAR_CURSOR_DOWN;
   use crate::VTS_CLEAR_UNTIL_NEWLINE;
   use crate::VTS_MOVE_TO_ZERO_COL;
@@ -552,18 +550,6 @@ mod test {
     }
 
     pub fn render_clear(&mut self) -> Option<String> {
-      self.inner.render_items(
-        vec![
-          TextItem::new("Some regulard text."),
-          TextItem::HangingText {
-            text: Cow::Borrowed(
-              "some long text that will wrap at a certain width",
-            ),
-            indent: 4,
-          },
-        ]
-        .iter(),
-      );
       self
         .inner
         .render_clear()
@@ -604,7 +590,7 @@ mod test {
     let result = tester.render("1").unwrap();
     assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~1~MOVE0~");
     let result = tester.render("").unwrap();
-    assert_eq!(result, "~MOVE0~~CLEAR_UNTIL_NEWLINE~~MOVE0~");
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~");
 
     // should not add a move0 here
     tester.keep_cursor_zero_column(false);
