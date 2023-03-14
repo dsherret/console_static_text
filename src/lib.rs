@@ -1,16 +1,15 @@
 use std::borrow::Cow;
 use std::io::Write;
 
+use ansi::strip_ansi_codes;
 use unicode_width::UnicodeWidthStr;
 use word::tokenize_words;
 use word::WordToken;
 
-mod ansi;
+pub mod ansi;
 #[cfg(feature = "sized")]
 mod console;
 mod word;
-
-pub use ansi::strip_ansi_codes;
 
 const VTS_MOVE_TO_ZERO_COL: &str = "\x1B[0G";
 const VTS_CLEAR_CURSOR_DOWN: &str = concat!(
