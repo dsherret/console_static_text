@@ -16,8 +16,12 @@ pub fn strip_ansi_codes(text: &str) -> Cow<str> {
   } else {
     let mut final_text = String::new();
     for token in tokens {
+      let token_text = &text[token.range];
       if !token.is_escape {
-        final_text.push_str(&text[token.range]);
+        final_text.push_str(token_text);
+      } else if token_text == "\u{1b}[1C" {
+        // change a single move cursor right to a space
+        final_text.push(' ');
       }
     }
     Cow::Owned(final_text)
