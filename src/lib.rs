@@ -125,13 +125,13 @@ impl ConsoleStaticText {
     if !atty::is(atty::Stream::Stderr) || console::size().is_none() {
       None
     } else {
-      Self::new(|| {
+      Some(Self::new(|| {
         let size = console::size();
         ConsoleSize {
           cols: size.map(|s| s.0 .0),
           rows: size.map(|s| s.1 .0),
         }
-      })
+      }))
     }
   }
 
