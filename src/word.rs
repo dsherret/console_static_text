@@ -5,6 +5,16 @@ pub enum WordToken<'a> {
   NewLine,
 }
 
+impl<'a> WordToken<'a> {
+  pub fn len(&self) -> usize {
+    match self {
+      WordToken::Word(text) => text.len(),
+      WordToken::WhiteSpace(c) => c.len_utf8(),
+      WordToken::NewLine => 1,
+    }
+  }
+}
+
 /// Takes a string and tokenizes it into words, whitespace, and newlines.
 pub fn tokenize_words(text: &str) -> impl Iterator<Item = WordToken> {
   TokenIterator {
@@ -24,28 +34,26 @@ impl<'a> Iterator for TokenIterator<'a> {
   fn next(&mut self) -> Option<Self::Item> {
     let remaining_text = &self.text[self.current_index..];
     if remaining_text.is_empty() {
-      None
-    } else if let Some(end_word_index) =
-      remaining_text.find(|c: char| c.is_whitespace() || c == '\n')
-    {
-      if end_word_index == 0 {
-        // it's a newline or whitespace
-        let c = remaining_text.chars().next().unwrap();
-        self.current_index += c.len_utf8();
-        Some(if c == '\n' {
-          WordToken::NewLine
-        } else {
-          WordToken::WhiteSpace(c)
-        })
+      return None; // end of string
+    }
+
+    let whitespace_or_newline_index =
+      remaining_text.find(|c: char| c.is_whitespace() || c == '\n');
+    let token = if whitespace_or_newline_index == Some(0) {
+      let c = remaining_text.chars().next().unwrap();
+      if c == '\n' {
+        WordToken::NewLine
       } else {
-        let next = &remaining_text[..end_word_index];
-        self.current_index += next.len();
-        Some(WordToken::Word(next))
+        WordToken::WhiteSpace(c)
       }
     } else {
-      self.current_index += remaining_text.len();
-      Some(WordToken::Word(remaining_text))
-    }
+      let word_end_index =
+        whitespace_or_newline_index.unwrap_or(remaining_text.len());
+      let next = &remaining_text[..word_end_index];
+      WordToken::Word(next)
+    };
+    self.current_index += token.len();
+    Some(token)
   }
 }
 
@@ -81,13 +89,14 @@ mod tokenize_tests {
 
   #[test]
   fn tokenize_words_newline_spaces() {
-    let result = tokenize_words("hello \n world");
+    let result = tokenize_words("hello \n  world");
     assert_eq!(
       result.collect::<Vec<_>>(),
       [
         WordToken::Word("hello"),
         WordToken::WhiteSpace(' '),
         WordToken::NewLine,
+        WordToken::WhiteSpace(' '),
         WordToken::WhiteSpace(' '),
         WordToken::Word("world")
       ]
