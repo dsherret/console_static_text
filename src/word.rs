@@ -40,7 +40,7 @@ impl<'a> Iterator for TokenIterator<'a> {
     }
 
     let whitespace_or_newline_index =
-      find_whitespace_or_newline(&remaining_text);
+      find_whitespace_or_newline(remaining_text);
     let token = if whitespace_or_newline_index == Some(0) {
       let c = remaining_text.chars().next().unwrap();
       match c {
