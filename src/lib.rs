@@ -197,7 +197,7 @@ impl ConsoleStaticText {
     if new_text.is_empty() {
       self.render_clear_with_size(size)
     } else {
-      self.render_items_with_size(vec![TextItem::new(new_text)].iter(), size)
+      self.render_items_with_size([TextItem::new(new_text)].iter(), size)
     }
   }
 
@@ -341,11 +341,11 @@ fn render_items<'a>(
   for item in text_items {
     match item {
       TextItem::Text(text) => {
-        lines.extend(render_text_to_lines(&text, 0, terminal_width))
+        lines.extend(render_text_to_lines(text, 0, terminal_width))
       }
       TextItem::HangingText { text, indent } => {
         lines.extend(render_text_to_lines(
-          &text,
+          text,
           *indent as usize,
           terminal_width,
         ));
