@@ -450,7 +450,7 @@ fn render_text_to_lines(
           line_width +=
             unicode_width::UnicodeWidthChar::width(space_char).unwrap_or(1);
         }
-        WordToken::NewLine => {
+        WordToken::LfNewLine | WordToken::CrlfNewLine => {
           lines.push(Line::new(current_line));
           current_line = String::new();
           line_width = 0;
