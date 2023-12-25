@@ -33,7 +33,7 @@ unicode-width = "0.1.11"
 vte = "0.13.0"
 
 [target.'cfg(not(windows))'.dependencies]
-rustix = { version = "0.38.28", features = ["termios"], optional = true }
+rustix = { version = "0.38.28", features = ["stdio"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_System_Console"], optional = true }
