@@ -17,5 +17,5 @@ pub fn size() -> Option<(Width, Height)> {
 
 #[cfg(not(windows))]
 pub fn size() -> Option<(Width, Height)> {
-  terminal_size::terminal_size_using_fd(rustix::io::raw_stderr())
+  terminal_size::terminal_size_using_fd(rustix::stdio::raw_stderr())
 }
