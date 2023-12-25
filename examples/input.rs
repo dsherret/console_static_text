@@ -7,6 +7,7 @@ use crossterm::event;
 use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
+use crossterm::event::KeyEventKind;
 use crossterm::execute;
 
 struct DrawState {
@@ -53,7 +54,9 @@ pub fn main() {
       // (make sure to handle always turning off raw mode)
       match event {
         KeyEvent {
-          code: KeyCode::Up, ..
+          code: KeyCode::Up,
+          kind: KeyEventKind::Press,
+          ..
         } => {
           if state.active_index == 0 {
             state.active_index = state.items.len() - 1;
@@ -63,12 +66,14 @@ pub fn main() {
         }
         KeyEvent {
           code: KeyCode::Down,
+          kind: KeyEventKind::Press,
           ..
         } => {
           state.active_index = (state.active_index + 1) % state.items.len();
         }
         KeyEvent {
           code: KeyCode::Enter,
+          kind: KeyEventKind::Press,
           ..
         } => {
           break;
