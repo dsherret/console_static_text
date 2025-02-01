@@ -253,7 +253,7 @@ impl ConsoleStaticText {
         }
         for (i, new_line) in new_lines.iter().enumerate() {
           if i > 0 {
-            text.push('\n');
+            text.push_str("\r\n");
           }
           text.push_str(&new_line.text);
           if !is_terminal_different_size {
