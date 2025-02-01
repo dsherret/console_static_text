@@ -576,7 +576,7 @@ mod test {
   fn renders() {
     let mut tester = Tester::new();
     let result = tester.render("01234567890123456").unwrap();
-    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~0123456789\n0123456~MOVE0~");
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~0123456789\r\n0123456~MOVE0~");
     let result = tester.render("123").unwrap();
     assert_eq!(
       result,
@@ -601,16 +601,16 @@ mod test {
   fn moves_long_text_multiple_lines() {
     let mut tester = Tester::new();
     let result = tester.render("012345 67890").unwrap();
-    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\n67890~MOVE0~");
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\r\n67890~MOVE0~");
     let result = tester.render("01234567890 67890").unwrap();
-    assert_eq!(result, "~MOVE0~~CUP1~0123456789\n0 67890~MOVE0~");
+    assert_eq!(result, "~MOVE0~~CUP1~0123456789\r\n0 67890~MOVE0~");
   }
 
   #[test]
   fn text_with_blank_line() {
     let mut tester = Tester::new();
-    let result = tester.render("012345\n\n67890").unwrap();
-    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\n\n67890~MOVE0~");
+    let result = tester.render("012345\r\n\r\n67890").unwrap();
+    assert_eq!(result, "~MOVE0~~CLEAR_CDOWN~012345\r\n\r\n67890~MOVE0~");
     let result = tester.render("123").unwrap();
     assert_eq!(
       result,
