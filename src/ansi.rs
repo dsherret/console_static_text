@@ -9,7 +9,7 @@ pub struct AnsiToken {
   pub is_escape: bool,
 }
 
-pub fn strip_ansi_codes(text: &str) -> Cow<str> {
+pub fn strip_ansi_codes(text: &str) -> Cow<'_, str> {
   let tokens = tokenize(text);
   if tokens.is_empty() || tokens.len() == 1 && !tokens[0].is_escape {
     Cow::Borrowed(text)

@@ -47,7 +47,7 @@ pub fn main() {
   // render, then act on up and down arrow key presses
   loop {
     let items = render(&state);
-    static_text.eprint_items(items.iter());
+    static_text.eprint_items(items.iter()).unwrap();
 
     if let Event::Key(event) = event::read().unwrap() {
       // in a real implementation you will want to handle ctrl+c here
@@ -89,12 +89,12 @@ pub fn main() {
   // display what the user selected
   crossterm::terminal::disable_raw_mode().unwrap();
   execute!(stderr(), crossterm::cursor::Show).unwrap();
-  static_text.eprint_clear();
+  static_text.eprint_clear().unwrap();
   eprintln!("Selected: {}", state.items[state.active_index]);
 }
 
 /// Renders the draw state
-fn render(state: &DrawState) -> Vec<TextItem> {
+fn render(state: &DrawState) -> Vec<TextItem<'_>> {
   let mut items = Vec::new();
 
   // display the question message

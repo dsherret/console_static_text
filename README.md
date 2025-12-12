@@ -18,11 +18,11 @@ let mut static_text = ConsoleStaticText::new(|| {
   }
 });
 
-static_text.eprint("initial\ntext");
+static_text.eprint("initial\ntext").unwrap();
 std::thread::sleep_ms(1000);
 
 // will clear the previous text and put this new text
-static_text.eprint("new text");
+static_text.eprint("new text").unwrap();
 std::thread::sleep_ms(1000);
 
 // or get and output the text manually
@@ -32,7 +32,7 @@ if let Some(text) = static_text.render("new text") {
 }
 
 // clear out the previous text
-static_text.eprint_clear();
+static_text.eprint_clear().unwrap();
 ```
 
 ## Hanging indentation
@@ -46,7 +46,7 @@ static_text.eprint_items(vec![
     text: Cow::Borrowed("some long text that will wrap at a certain width"),
     indent: 4,
   },
-].iter());
+].iter()).unwrap();
 ```
 
 This is useful when implementing something like a selection UI where you want text to wrap with hanging indentation.
@@ -65,8 +65,8 @@ Then you can use the `new_sized` function, which will get the console size autom
 ```rs
 let mut static_text = ConsoleStaticText::new_sized();
 
-static_text.eprint("initial\ntext");
+static_text.eprint("initial\ntext").unwrap();
 std::thread::sleep_ms(1000);
 
-static_text.eprint("next text");
+static_text.eprint("next text").unwrap();
 ```

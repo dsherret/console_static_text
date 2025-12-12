@@ -3,8 +3,8 @@ use std::io::Write;
 
 use ansi::strip_ansi_codes;
 use unicode_width::UnicodeWidthStr;
-use word::tokenize_words;
 use word::WordToken;
+use word::tokenize_words;
 
 pub mod ansi;
 #[cfg(feature = "sized")]
@@ -128,8 +128,8 @@ impl ConsoleStaticText {
       Some(Self::new(|| {
         let size = console::size();
         ConsoleSize {
-          cols: size.map(|s| s.0 .0),
-          rows: size.map(|s| s.1 .0),
+          cols: size.map(|s| s.0.0),
+          rows: size.map(|s| s.1.0),
         }
       }))
     }
@@ -144,10 +144,11 @@ impl ConsoleStaticText {
     (self.console_size)()
   }
 
-  pub fn eprint_clear(&mut self) {
+  pub fn eprint_clear(&mut self) -> std::io::Result<()> {
     if let Some(text) = self.render_clear() {
-      std::io::stderr().write_all(text.as_bytes()).unwrap();
+      std::io::stderr().write_all(text.as_bytes())?;
     }
+    Ok(())
   }
 
   pub fn render_clear(&mut self) -> Option<String> {
@@ -173,16 +174,22 @@ impl ConsoleStaticText {
     }
   }
 
-  pub fn eprint(&mut self, new_text: &str) {
+  pub fn eprint(&mut self, new_text: &str) -> std::io::Result<()> {
     if let Some(text) = self.render(new_text) {
-      std::io::stderr().write_all(text.as_bytes()).unwrap();
+      std::io::stderr().write_all(text.as_bytes())?;
     }
+    Ok(())
   }
 
-  pub fn eprint_with_size(&mut self, new_text: &str, size: ConsoleSize) {
+  pub fn eprint_with_size(
+    &mut self,
+    new_text: &str,
+    size: ConsoleSize,
+  ) -> std::io::Result<()> {
     if let Some(text) = self.render_with_size(new_text, size) {
-      std::io::stderr().write_all(text.as_bytes()).unwrap();
+      std::io::stderr().write_all(text.as_bytes())?;
     }
+    Ok(())
   }
 
   pub fn render(&mut self, new_text: &str) -> Option<String> {
@@ -204,7 +211,7 @@ impl ConsoleStaticText {
   pub fn eprint_items<'a>(
     &mut self,
     text_items: impl Iterator<Item = &'a TextItem<'a>>,
-  ) {
+  ) -> std::io::Result<()> {
     self.eprint_items_with_size(text_items, self.console_size())
   }
 
@@ -212,10 +219,11 @@ impl ConsoleStaticText {
     &mut self,
     text_items: impl Iterator<Item = &'a TextItem<'a>>,
     size: ConsoleSize,
-  ) {
+  ) -> std::io::Result<()> {
     if let Some(text) = self.render_items_with_size(text_items, size) {
-      std::io::stderr().write_all(text.as_bytes()).unwrap();
+      std::io::stderr().write_all(text.as_bytes())?;
     }
+    Ok(())
   }
 
   pub fn render_items<'a>(
@@ -256,12 +264,11 @@ impl ConsoleStaticText {
             text.push_str("\r\n");
           }
           text.push_str(&new_line.text);
-          if !is_terminal_different_size {
-            if let Some(last_line) = last_lines.get(i) {
-              if last_line.char_width > new_line.char_width {
-                text.push_str(VTS_CLEAR_UNTIL_NEWLINE);
-              }
-            }
+          if !is_terminal_different_size
+            && let Some(last_line) = last_lines.get(i)
+            && last_line.char_width > new_line.char_width
+          {
+            text.push_str(VTS_CLEAR_UNTIL_NEWLINE);
           }
         }
         if last_lines.len() > new_lines.len() {
@@ -477,13 +484,13 @@ mod test {
   use std::sync::Arc;
   use std::sync::Mutex;
 
-  use crate::vts_move_down;
-  use crate::vts_move_up;
   use crate::ConsoleSize;
   use crate::ConsoleStaticText;
   use crate::VTS_CLEAR_CURSOR_DOWN;
   use crate::VTS_CLEAR_UNTIL_NEWLINE;
   use crate::VTS_MOVE_TO_ZERO_COL;
+  use crate::vts_move_down;
+  use crate::vts_move_up;
 
   fn test_mappings() -> Vec<(String, String)> {
     let mut mappings = Vec::new();
@@ -518,7 +525,7 @@ mod test {
       Self {
         inner: {
           let size = size.clone();
-          ConsoleStaticText::new(move || size.lock().unwrap().clone())
+          ConsoleStaticText::new(move || *size.lock().unwrap())
         },
         size,
         mappings: test_mappings(),

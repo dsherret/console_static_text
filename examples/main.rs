@@ -4,7 +4,7 @@ use console_static_text::ConsoleSize;
 use console_static_text::ConsoleStaticText;
 
 pub fn main() {
-  let mut static_text = ConsoleStaticText::new(|| console_size());
+  let mut static_text = ConsoleStaticText::new(console_size);
 
   let mut count = 0;
   let mut last_size = None;
@@ -26,7 +26,7 @@ pub fn main() {
         "lines when the terminal width is small enough.\n"
       ));
       text.push_str(&render_progress_bar(count % 100, 100, size.cols.unwrap()));
-      static_text.eprint_with_size(&text, size);
+      static_text.eprint_with_size(&text, size).unwrap();
     }
 
     count += 1;
@@ -49,12 +49,11 @@ fn render_progress_bar(
   terminal_width: u16,
 ) -> String {
   let mut text = String::new();
-  let max_width =
-    std::cmp::max(10, std::cmp::min(75, terminal_width as i32 - 5)) as usize;
+  let max_width = (terminal_width as i32 - 5).clamp(10, 75) as usize;
   let total_bars = max_width - 2; // open and close brace
   let percent_done = current_bytes as f64 / total_bytes as f64;
   let completed_bars = (total_bars as f64 * percent_done).floor() as usize;
-  text.push_str("[");
+  text.push('[');
   if completed_bars != total_bars {
     if completed_bars > 0 {
       text.push_str(&format!("{}{}", "#".repeat(completed_bars - 1), ">"));
