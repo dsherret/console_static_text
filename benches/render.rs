@@ -42,6 +42,20 @@ fn single_item_many_paragraphs(bencher: divan::Bencher, n: usize) {
   });
 }
 
+// A single item containing one very long unbroken word. Exercises the
+// long-word per-char break path; only the bottom 25 wrapped lines should
+// survive, but every char above must still be examined to know where to
+// break.
+#[divan::bench(args = [80, 800, 8_000, 80_000])]
+fn single_long_line(bencher: divan::Bencher, len: usize) {
+  let text: String = std::iter::repeat('x').take(len).collect();
+  let items = [TextItem::new_owned(text)];
+  bencher.bench_local(|| {
+    let mut s = ConsoleStaticText::new(|| SIZE);
+    s.render_items_with_size(divan::black_box(items.iter()), SIZE)
+  });
+}
+
 // Items that need word wrapping — exercises the per-word path that previously
 // allocated a `Vec<AnsiToken>` for every word.
 #[divan::bench(args = [25, 100, 1_000])]
