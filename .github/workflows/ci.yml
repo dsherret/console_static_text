@@ -2,14 +2,16 @@ name: Cargo Build & Test
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
   build_and_test:
     name: Build & Test Console Static Text
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - run: rustup update stable && rustup default stable
       - run: cargo build --all-features
       - run: cargo test --all-features
