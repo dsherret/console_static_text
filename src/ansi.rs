@@ -10,6 +10,10 @@ pub struct AnsiToken {
 }
 
 pub fn strip_ansi_codes(text: &str) -> Cow<'_, str> {
+  // fast path: no escape byte means no parser work and no allocation
+  if !text.as_bytes().contains(&0x1b) {
+    return Cow::Borrowed(text);
+  }
   let tokens = tokenize(text);
   if tokens.is_empty() || tokens.len() == 1 && !tokens[0].is_escape {
     Cow::Borrowed(text)

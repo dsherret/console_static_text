@@ -1,7 +1,7 @@
 #[derive(PartialEq, Debug)]
 pub enum WordToken<'a> {
   Word(&'a str),
-  WhiteSpace(char),
+  WhiteSpace(&'a str),
   LfNewLine,
   CrlfNewLine,
 }
@@ -10,14 +10,14 @@ impl<'a> WordToken<'a> {
   pub fn len(&self) -> usize {
     match self {
       WordToken::Word(text) => text.len(),
-      WordToken::WhiteSpace(c) => c.len_utf8(),
+      WordToken::WhiteSpace(text) => text.len(),
       WordToken::LfNewLine => 1,
       WordToken::CrlfNewLine => 2,
     }
   }
 }
 
-/// Takes a string and tokenizes it into words, whitespace, and newlines.
+/// Takes a string and tokenizes it into words, whitespace runs, and newlines.
 pub fn tokenize_words(text: &str) -> impl Iterator<Item = WordToken<'_>> {
   TokenIterator {
     text,
@@ -36,31 +36,49 @@ impl<'a> Iterator for TokenIterator<'a> {
   fn next(&mut self) -> Option<Self::Item> {
     let remaining_text = &self.text[self.current_index..];
     if remaining_text.is_empty() {
-      return None; // end of string
+      return None;
     }
 
-    let whitespace_or_newline_index =
-      find_whitespace_or_newline(remaining_text);
-    let token = if whitespace_or_newline_index == Some(0) {
-      let c = remaining_text.chars().next().unwrap();
-      match c {
-        '\n' => WordToken::LfNewLine,
-        // guaranteed by find_whitespace_or_newline to be \r\n
-        '\r' => WordToken::CrlfNewLine,
-        _ => WordToken::WhiteSpace(c),
+    let mut chars = remaining_text.char_indices();
+    let (_, first_char) = chars.next().unwrap();
+    let token = match first_char {
+      '\n' => WordToken::LfNewLine,
+      '\r'
+        if remaining_text.as_bytes().get(first_char.len_utf8())
+          == Some(&b'\n') =>
+      {
+        WordToken::CrlfNewLine
       }
-    } else {
-      let word_end_index =
-        whitespace_or_newline_index.unwrap_or(remaining_text.len());
-      let next = &remaining_text[..word_end_index];
-      WordToken::Word(next)
+      // a lone `\r` is treated as part of a word — match find_word_boundary below
+      c if c.is_whitespace() && c != '\r' => {
+        let end = find_whitespace_run_end(remaining_text);
+        WordToken::WhiteSpace(&remaining_text[..end])
+      }
+      _ => {
+        let end =
+          find_word_boundary(remaining_text).unwrap_or(remaining_text.len());
+        WordToken::Word(&remaining_text[..end])
+      }
     };
     self.current_index += token.len();
     Some(token)
   }
 }
 
-fn find_whitespace_or_newline(text: &str) -> Option<usize> {
+fn find_whitespace_run_end(text: &str) -> usize {
+  for (index, c) in text.char_indices() {
+    // newlines and lone `\r` end the whitespace run
+    match c {
+      '\n' => return index,
+      '\r' => return index,
+      c if !c.is_whitespace() => return index,
+      _ => {}
+    }
+  }
+  text.len()
+}
+
+fn find_word_boundary(text: &str) -> Option<usize> {
   let mut chars = text.char_indices().peekable();
   while let Some((index, c)) = chars.next() {
     match c {
@@ -87,7 +105,7 @@ mod tokenize_tests {
       result.collect::<Vec<_>>(),
       [
         WordToken::Word("hello"),
-        WordToken::WhiteSpace(' '),
+        WordToken::WhiteSpace(" "),
         WordToken::Word("world")
       ]
     );
@@ -117,10 +135,9 @@ mod tokenize_tests {
       result.collect::<Vec<_>>(),
       [
         WordToken::Word("hello"),
-        WordToken::WhiteSpace(' '),
+        WordToken::WhiteSpace(" "),
         WordToken::LfNewLine,
-        WordToken::WhiteSpace(' '),
-        WordToken::WhiteSpace(' '),
+        WordToken::WhiteSpace("  "),
         WordToken::Word("world")
       ]
     );
@@ -133,7 +150,7 @@ mod tokenize_tests {
       result.collect::<Vec<_>>(),
       [
         WordToken::Word("hello"),
-        WordToken::WhiteSpace('\t'),
+        WordToken::WhiteSpace("\t"),
         WordToken::Word("world")
       ]
     );
@@ -151,9 +168,9 @@ mod tokenize_tests {
     assert_eq!(
       result.collect::<Vec<_>>(),
       [
-        WordToken::WhiteSpace(' '),
+        WordToken::WhiteSpace(" "),
         WordToken::Word("hello"),
-        WordToken::WhiteSpace(' ')
+        WordToken::WhiteSpace(" ")
       ]
     );
   }
@@ -165,7 +182,7 @@ mod tokenize_tests {
       result.collect::<Vec<_>>(),
       [
         WordToken::Word("hello⌘"),
-        WordToken::WhiteSpace(' '),
+        WordToken::WhiteSpace(" "),
         WordToken::Word("⌘world")
       ]
     );
