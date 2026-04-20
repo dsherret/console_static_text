@@ -18,7 +18,7 @@ impl<'a> WordToken<'a> {
 }
 
 /// Takes a string and tokenizes it into words, whitespace, and newlines.
-pub fn tokenize_words(text: &str) -> impl Iterator<Item = WordToken> {
+pub fn tokenize_words(text: &str) -> impl Iterator<Item = WordToken<'_>> {
   TokenIterator {
     text,
     current_index: 0,
@@ -66,7 +66,7 @@ fn find_whitespace_or_newline(text: &str) -> Option<usize> {
     match c {
       '\n' => return Some(index),
       '\r' if chars.peek().map(|(_, c)| *c) == Some('\n') => {
-        return Some(index)
+        return Some(index);
       }
       '\r' => {} // don't bother with \r only newlines... skip
       c if c.is_whitespace() => return Some(index),
