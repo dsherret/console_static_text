@@ -79,6 +79,53 @@ impl Line {
   }
 }
 
+// A line described as a sequence of borrowed segments from the source text
+// plus a hanging-indent prefix. We defer allocating the final `String` until
+// we know the line will actually be displayed — items above the console
+// height, or paragraphs above a tall item's visible window, never pay the
+// concatenation cost.
+struct PendingLine<'a> {
+  indent: usize,
+  segments: Vec<&'a str>,
+  total_bytes: usize,
+  char_width: usize,
+}
+
+impl<'a> PendingLine<'a> {
+  fn new(indent: usize) -> Self {
+    Self {
+      indent,
+      segments: Vec::new(),
+      total_bytes: 0,
+      char_width: indent,
+    }
+  }
+
+  fn push_segment(&mut self, s: &'a str, visible_width: usize) {
+    self.segments.push(s);
+    self.total_bytes += s.len();
+    self.char_width += visible_width;
+  }
+
+  fn into_line(self) -> Line {
+    let mut text = String::with_capacity(self.indent + self.total_bytes);
+    for _ in 0..self.indent {
+      text.push(' ');
+    }
+    for seg in self.segments {
+      text.push_str(seg);
+    }
+    Line {
+      char_width: self.char_width,
+      text,
+    }
+  }
+
+  fn has_content(&self) -> bool {
+    !self.segments.is_empty() || self.indent > 0
+  }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConsoleSize {
   pub cols: Option<u16>,
@@ -210,14 +257,14 @@ impl ConsoleStaticText {
 
   pub fn eprint_items<'a>(
     &mut self,
-    text_items: impl Iterator<Item = &'a TextItem<'a>>,
+    text_items: impl DoubleEndedIterator<Item = &'a TextItem<'a>>,
   ) -> std::io::Result<()> {
     self.eprint_items_with_size(text_items, self.console_size())
   }
 
   pub fn eprint_items_with_size<'a>(
     &mut self,
-    text_items: impl Iterator<Item = &'a TextItem<'a>>,
+    text_items: impl DoubleEndedIterator<Item = &'a TextItem<'a>>,
     size: ConsoleSize,
   ) -> std::io::Result<()> {
     if let Some(text) = self.render_items_with_size(text_items, size) {
@@ -228,27 +275,29 @@ impl ConsoleStaticText {
 
   pub fn render_items<'a>(
     &mut self,
-    text_items: impl Iterator<Item = &'a TextItem<'a>>,
+    text_items: impl DoubleEndedIterator<Item = &'a TextItem<'a>>,
   ) -> Option<String> {
     self.render_items_with_size(text_items, self.console_size())
   }
 
   pub fn render_items_with_size<'a>(
     &mut self,
-    text_items: impl Iterator<Item = &'a TextItem<'a>>,
+    text_items: impl DoubleEndedIterator<Item = &'a TextItem<'a>>,
     size: ConsoleSize,
   ) -> Option<String> {
     let is_terminal_different_size = size != self.last_size;
     let last_lines = self.get_last_lines(size);
     let new_lines = render_items(text_items, size);
-    let last_lines_for_new_lines = raw_render_last_items(
-      &new_lines
-        .iter()
-        .map(|l| l.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n"),
-      size,
-    );
+    // new_lines are already wrapped to the terminal width and truncated
+    // to the height by render_items, so we only need to ANSI-strip the
+    // text to mirror what raw_render_last_items would produce.
+    let last_lines_for_new_lines: Vec<Line> = new_lines
+      .iter()
+      .map(|line| Line {
+        char_width: line.char_width,
+        text: strip_ansi_codes(&line.text).into_owned(),
+      })
+      .collect();
     let result =
       if !are_collections_equal(&last_lines, &last_lines_for_new_lines) {
         let mut text = String::new();
@@ -290,7 +339,7 @@ impl ConsoleStaticText {
 
   fn get_last_lines(&mut self, size: ConsoleSize) -> Vec<Line> {
     if size == self.last_size {
-      self.last_lines.drain(..).collect()
+      std::mem::take(&mut self.last_lines)
     } else {
       // render the last text with the current terminal width
       let line_texts = self
@@ -340,27 +389,47 @@ fn raw_render_last_items(text: &str, size: ConsoleSize) -> Vec<Line> {
 }
 
 fn render_items<'a>(
-  text_items: impl Iterator<Item = &'a TextItem<'a>>,
+  text_items: impl DoubleEndedIterator<Item = &'a TextItem<'a>>,
   size: ConsoleSize,
 ) -> Vec<Line> {
-  let mut lines = Vec::new();
   let terminal_width = size.cols.map(|c| c as usize);
-  for item in text_items {
-    match item {
-      TextItem::Text(text) => {
-        lines.extend(render_text_to_lines(text, 0, terminal_width))
-      }
+  let terminal_height = size.rows.map(|c| c as usize);
+
+  // process items bottom-up so thousands of text items don't force
+  // rendering work we'd immediately truncate away. accumulate lines
+  // in reverse, stopping once we've filled the console height.
+  let mut iter = text_items.rev().peekable();
+  let mut rev_lines: Vec<Line> = match terminal_height {
+    Some(h) if iter.peek().is_some() => Vec::with_capacity(h),
+    _ => Vec::new(),
+  };
+  'outer: for item in iter {
+    if let Some(h) = terminal_height
+      && rev_lines.len() >= h
+    {
+      break;
+    }
+    let (text, indent) = match item {
+      TextItem::Text(text) => (text.as_ref(), 0usize),
       TextItem::HangingText { text, indent } => {
-        lines.extend(render_text_to_lines(
-          text,
-          *indent as usize,
-          terminal_width,
-        ));
+        (text.as_ref(), *indent as usize)
+      }
+    };
+    let remaining = terminal_height.map(|h| h - rev_lines.len());
+    let pending =
+      render_text_to_pending(text, indent, terminal_width, remaining);
+    for pl in pending.into_iter().rev() {
+      rev_lines.push(pl.into_line());
+      if let Some(h) = terminal_height
+        && rev_lines.len() >= h
+      {
+        break 'outer;
       }
     }
   }
+  rev_lines.reverse();
+  let lines = rev_lines;
 
-  let lines = truncate_lines_height(lines, size);
   // ensure there's always 1 line
   if lines.is_empty() {
     vec![Line::new(String::new())]
@@ -369,110 +438,190 @@ fn render_items<'a>(
   }
 }
 
-fn truncate_lines_height(lines: Vec<Line>, size: ConsoleSize) -> Vec<Line> {
-  match size.rows.map(|c| c as usize) {
-    Some(terminal_height) if lines.len() > terminal_height => {
-      let cutoff_index = lines.len() - terminal_height;
-      lines
-        .into_iter()
-        .enumerate()
-        .filter_map(|(index, line)| {
-          if index < cutoff_index {
-            None
-          } else {
-            Some(line)
+fn truncate_lines_height(mut lines: Vec<Line>, size: ConsoleSize) -> Vec<Line> {
+  if let Some(terminal_height) = size.rows.map(|c| c as usize)
+    && lines.len() > terminal_height
+  {
+    let cutoff_index = lines.len() - terminal_height;
+    lines.drain(..cutoff_index);
+  }
+  lines
+}
+
+// Produces pending lines for a single text item, processing paragraphs
+// (newline-delimited segments) bottom-up and stopping once `max_lines` is
+// satisfied. This means early paragraphs of a tall item are never word-wrapped
+// if they'd be truncated away anyway.
+fn render_text_to_pending<'a>(
+  text: &'a str,
+  hanging_indent: usize,
+  terminal_width: Option<usize>,
+  max_lines: Option<usize>,
+) -> Vec<PendingLine<'a>> {
+  if text.is_empty() || max_lines == Some(0) {
+    return Vec::new();
+  }
+
+  let paragraphs: Vec<&'a str> = text.split_terminator('\n').collect();
+  // paragraph i was preceded by `\n` in the source when i > 0; when it's a
+  // middle/early paragraph the trailing `\r` belongs to a CRLF pair and must
+  // be trimmed so it doesn't leak into the rendered line
+  let paragraph_at = |i: usize| -> &'a str {
+    let p = paragraphs[i];
+    if i + 1 < paragraphs.len() {
+      p.strip_suffix('\r').unwrap_or(p)
+    } else {
+      p
+    }
+  };
+
+  match terminal_width {
+    None => {
+      // no wrapping — each paragraph is exactly one line
+      let start =
+        max_lines.map_or(0, |max| paragraphs.len().saturating_sub(max));
+      (start..paragraphs.len())
+        .map(|i| {
+          let p = paragraph_at(i);
+          let width = UnicodeWidthStr::width(strip_ansi_codes(p).as_ref());
+          let mut pl = PendingLine::new(0);
+          if !p.is_empty() {
+            pl.push_segment(p, width);
           }
+          pl
         })
         .collect()
     }
-    _ => lines,
+    Some(terminal_width) => {
+      let mut result: Vec<PendingLine<'a>> = Vec::new();
+      'outer: for i in (0..paragraphs.len()).rev() {
+        let p = paragraph_at(i);
+        let mut paragraph_lines =
+          wrap_paragraph(p, hanging_indent, terminal_width);
+        if paragraph_lines.is_empty() {
+          // an empty or whitespace-only paragraph still occupies one line
+          paragraph_lines.push(PendingLine::new(0));
+        }
+        for pl in paragraph_lines.into_iter().rev() {
+          result.push(pl);
+          if let Some(max) = max_lines
+            && result.len() >= max
+          {
+            break 'outer;
+          }
+        }
+      }
+      result.reverse();
+      result
+    }
   }
 }
 
-fn render_text_to_lines(
-  text: &str,
+fn wrap_paragraph<'a>(
+  text: &'a str,
   hanging_indent: usize,
-  terminal_width: Option<usize>,
-) -> Vec<Line> {
-  let mut lines = Vec::new();
-  if let Some(terminal_width) = terminal_width {
-    let mut current_line = String::new();
-    let mut line_width = 0;
-    let mut current_whitespace = String::new();
-    for token in tokenize_words(text) {
-      match token {
-        WordToken::Word(word) => {
-          let word_width =
-            UnicodeWidthStr::width(strip_ansi_codes(word).as_ref());
-          let is_word_longer_than_half_line =
-            hanging_indent + word_width > (terminal_width / 2);
-          if is_word_longer_than_half_line {
-            // break it up onto multiple lines with indentation if able
-            if !current_whitespace.is_empty() {
-              if line_width < terminal_width {
-                current_line.push_str(&current_whitespace);
-              }
-              current_whitespace = String::new();
-            }
-            for ansi_token in ansi::tokenize(word) {
-              if ansi_token.is_escape {
-                current_line.push_str(&word[ansi_token.range]);
-              } else {
-                for c in word[ansi_token.range].chars() {
-                  if let Some(char_width) =
-                    unicode_width::UnicodeWidthChar::width(c)
-                  {
-                    if line_width + char_width > terminal_width {
-                      lines.push(Line::new(current_line));
-                      current_line = String::new();
-                      current_line.push_str(&" ".repeat(hanging_indent));
-                      line_width = hanging_indent;
-                    }
-                    current_line.push(c);
-                    line_width += char_width;
-                  } else {
-                    current_line.push(c);
-                  }
-                }
-              }
-            }
-          } else {
-            if line_width + word_width > terminal_width {
-              lines.push(Line::new(current_line));
-              current_line = String::new();
-              current_line.push_str(&" ".repeat(hanging_indent));
-              line_width = hanging_indent;
-              current_whitespace = String::new();
-            }
-            if !current_whitespace.is_empty() {
-              current_line.push_str(&current_whitespace);
-              current_whitespace = String::new();
-            }
-            current_line.push_str(word);
-            line_width += word_width;
+  terminal_width: usize,
+) -> Vec<PendingLine<'a>> {
+  let mut lines: Vec<PendingLine<'a>> = Vec::new();
+  let mut current_line = PendingLine::new(0);
+  let mut line_width: usize = 0;
+  let mut pending_whitespace: Option<&'a str> = None;
+
+  for token in tokenize_words(text) {
+    match token {
+      WordToken::Word(word) => {
+        let word_width =
+          UnicodeWidthStr::width(strip_ansi_codes(word).as_ref());
+        let is_word_longer_than_half_line =
+          hanging_indent + word_width > (terminal_width / 2);
+        if is_word_longer_than_half_line {
+          // flush pending whitespace if it still fits on the line
+          if let Some(ws) = pending_whitespace.take()
+            && line_width < terminal_width
+          {
+            let ws_width = visible_whitespace_width(ws);
+            current_line.push_segment(ws, ws_width);
           }
-        }
-        WordToken::WhiteSpace(space_char) => {
-          current_whitespace.push(space_char);
-          line_width +=
-            unicode_width::UnicodeWidthChar::width(space_char).unwrap_or(1);
-        }
-        WordToken::LfNewLine | WordToken::CrlfNewLine => {
-          lines.push(Line::new(current_line));
-          current_line = String::new();
-          line_width = 0;
+          // break the word at char boundaries across multiple lines,
+          // preserving ANSI escapes as zero-width segments
+          for ansi_token in ansi::tokenize(word) {
+            let chunk = &word[ansi_token.range.clone()];
+            if ansi_token.is_escape {
+              current_line.push_segment(chunk, 0);
+              continue;
+            }
+            let mut seg_start = 0;
+            let mut seg_width = 0;
+            let mut byte_pos = 0;
+            for c in chunk.chars() {
+              let c_len = c.len_utf8();
+              if let Some(char_width) =
+                unicode_width::UnicodeWidthChar::width(c)
+              {
+                if line_width + char_width > terminal_width {
+                  if byte_pos > seg_start {
+                    current_line.push_segment(
+                      &chunk[seg_start..byte_pos],
+                      seg_width,
+                    );
+                  }
+                  lines.push(std::mem::replace(
+                    &mut current_line,
+                    PendingLine::new(hanging_indent),
+                  ));
+                  line_width = hanging_indent;
+                  seg_start = byte_pos;
+                  seg_width = 0;
+                }
+                line_width += char_width;
+                seg_width += char_width;
+              }
+              byte_pos += c_len;
+            }
+            if byte_pos > seg_start {
+              current_line
+                .push_segment(&chunk[seg_start..byte_pos], seg_width);
+            }
+          }
+        } else {
+          if line_width + word_width > terminal_width {
+            lines.push(std::mem::replace(
+              &mut current_line,
+              PendingLine::new(hanging_indent),
+            ));
+            line_width = hanging_indent;
+            pending_whitespace = None;
+          }
+          if let Some(ws) = pending_whitespace.take() {
+            let ws_width = visible_whitespace_width(ws);
+            current_line.push_segment(ws, ws_width);
+          }
+          current_line.push_segment(word, word_width);
+          line_width += word_width;
         }
       }
-    }
-    if !current_line.is_empty() {
-      lines.push(Line::new(current_line));
-    }
-  } else {
-    for line in text.split('\n') {
-      lines.push(Line::new(line.to_string()));
+      WordToken::WhiteSpace(ws) => {
+        pending_whitespace = Some(ws);
+        line_width += visible_whitespace_width(ws);
+      }
+      WordToken::LfNewLine | WordToken::CrlfNewLine => {
+        // the caller splits on '\n' before invoking this function, so
+        // paragraphs never contain newline tokens
+        debug_assert!(false, "unexpected newline token in wrap_paragraph");
+      }
     }
   }
+
+  if current_line.has_content() {
+    lines.push(current_line);
+  }
   lines
+}
+
+fn visible_whitespace_width(s: &str) -> usize {
+  s.chars()
+    .map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(1))
+    .sum()
 }
 
 fn are_collections_equal<T: PartialEq>(a: &[T], b: &[T]) -> bool {
@@ -486,6 +635,7 @@ mod test {
 
   use crate::ConsoleSize;
   use crate::ConsoleStaticText;
+  use crate::TextItem;
   use crate::VTS_CLEAR_CURSOR_DOWN;
   use crate::VTS_CLEAR_UNTIL_NEWLINE;
   use crate::VTS_MOVE_TO_ZERO_COL;
@@ -623,5 +773,47 @@ mod test {
       result,
       "~MOVE0~~CUP2~123~CLEAR_UNTIL_NEWLINE~~CDOWN1~~CLEAR_CDOWN~~CUP1~~MOVE0~"
     );
+  }
+
+  // Lots of text items must only render the bottom ones that fit on
+  // screen — see https://github.com/dsherret/console_static_text/issues/1
+  #[test]
+  fn truncates_many_items_to_console_height() {
+    let size = ConsoleSize {
+      cols: Some(20),
+      rows: Some(3),
+    };
+    let mut s = ConsoleStaticText::new(move || size);
+    let items: Vec<TextItem> = (0..1000)
+      .map(|i| TextItem::new_owned(format!("line {}", i)))
+      .collect();
+    let result = s.render_items_with_size(items.iter(), size).unwrap();
+    assert!(result.contains("line 997"));
+    assert!(result.contains("line 998"));
+    assert!(result.contains("line 999"));
+    assert!(!result.contains("line 996"));
+    assert!(!result.contains("line 0"));
+  }
+
+  // A single item with thousands of paragraphs should only render the ones
+  // that fit — the paragraph-level bottom-up pass skips wrapping for the rest.
+  #[test]
+  fn truncates_many_paragraphs_in_single_item() {
+    let size = ConsoleSize {
+      cols: Some(20),
+      rows: Some(3),
+    };
+    let mut s = ConsoleStaticText::new(move || size);
+    let text = (0..1000)
+      .map(|i| format!("line {}", i))
+      .collect::<Vec<_>>()
+      .join("\n");
+    let items = [TextItem::new_owned(text)];
+    let result = s.render_items_with_size(items.iter(), size).unwrap();
+    assert!(result.contains("line 997"));
+    assert!(result.contains("line 998"));
+    assert!(result.contains("line 999"));
+    assert!(!result.contains("line 996"));
+    assert!(!result.contains("line 0"));
   }
 }
