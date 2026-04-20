@@ -560,10 +560,8 @@ fn wrap_paragraph<'a>(
               {
                 if line_width + char_width > terminal_width {
                   if byte_pos > seg_start {
-                    current_line.push_segment(
-                      &chunk[seg_start..byte_pos],
-                      seg_width,
-                    );
+                    current_line
+                      .push_segment(&chunk[seg_start..byte_pos], seg_width);
                   }
                   lines.push(std::mem::replace(
                     &mut current_line,
@@ -579,8 +577,7 @@ fn wrap_paragraph<'a>(
               byte_pos += c_len;
             }
             if byte_pos > seg_start {
-              current_line
-                .push_segment(&chunk[seg_start..byte_pos], seg_width);
+              current_line.push_segment(&chunk[seg_start..byte_pos], seg_width);
             }
           }
         } else {
